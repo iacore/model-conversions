@@ -1,0 +1,17 @@
+[package]
+name = "quantize-wizard"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.71"
+clap = { version = "4.2.5", features = ["derive"] }
+cyrly = "0.1.0"
+ggml-sys = { git = "https://github.com/rustformers/llm", version = "0.1.0" }
+memmap2 = "0.5.10"
+safetensors = "0.3.1"
+serde = { version = "1.0.160", features = ["derive"] }
+serde_json = "1.0.96"
+serde_yaml = "0.9.21"

@@ -1,3 +1,9 @@
+What's Included:
+
+- some python scripts
+- [Interactive Safetensors Quantization Tool](quantize-wizard)
+
+
 See [safetensors](https://github.com/huggingface/safetensors) repo for details about safetensors.
 
 See [rwkv.cpp](https://github.com/saharNooby/rwkv.cpp/tree/master/rwkv) for conversion form pth to rwkv.cpp-specific ggml format.

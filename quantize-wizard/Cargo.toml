@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.71"
 clap = { version = "4.2.5", features = ["derive"] }
 cyrly = "0.1.0"
-ggml-sys = { git = "https://github.com/rustformers/llm", version = "0.1.0" }
+ggml-sys = { git = "https://github.com/rustformers/llm", version = "0.1.1" }
 memmap2 = "0.5.10"
 safetensors = "0.3.1"
 serde = { version = "1.0.160", features = ["derive"] }

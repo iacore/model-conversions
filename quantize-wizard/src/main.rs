@@ -4,7 +4,6 @@ mod util;
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::IoSlice;
 use std::path::PathBuf;
 use std::{borrow::Cow, io::Write};
 
@@ -84,7 +83,7 @@ enum QuantizeTreatment {
     keep,
     q4_0,
     q4_1,
-    q4_2,
+    // q4_2,
     q5_0,
     q5_1,
     q8_0,
@@ -203,10 +202,10 @@ fn do_convert(args: ConvertArgs) -> anyhow::Result<()> {
 
                     // == float16 delta/min ==
                     //
-                    QuantizeTreatment::q4_2 => {
-                        let converted = quantize!(ggml_quantize_q4_2);
-                        ("q4_2", 2, converted.into())
-                    }
+                    // QuantizeTreatment::q4_2 => {
+                    //     let converted = quantize!(ggml_quantize_q4_2);
+                    //     ("q4_2", 2, converted.into())
+                    // }
                     QuantizeTreatment::q5_0 => {
                         let converted = quantize!(ggml_quantize_q5_0);
                         ("q5_0", 2, converted.into())

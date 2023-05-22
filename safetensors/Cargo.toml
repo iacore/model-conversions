@@ -1,0 +1,12 @@
+[package]
+name = "safetensors-1a"
+version = "0.1.0"
+edition = "2021"
+description = "simple .safetensors reader, 1A™ edition"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = "1.0.163"
+serde_json = "1.0.96"
+thiserror = "1.0.40"

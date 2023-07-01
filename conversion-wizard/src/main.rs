@@ -1,5 +1,3 @@
-#![feature(hash_raw_entry)]
-
 mod util;
 
 use std::collections::HashMap;
@@ -19,7 +17,7 @@ use serde_json::json;
 #[command(author, version, about, long_about = None)]
 enum Args {
     Plan(PlanArgs),
-    Convert(ConvertArgs),
+    Quantize(QuantizeArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -34,7 +32,7 @@ struct PlanArgs {
 }
 
 #[derive(Parser, Debug)]
-struct ConvertArgs {
+struct QuantizeArgs {
     /// input .safetensors file
     #[arg()]
     model_in: PathBuf,
@@ -53,17 +51,17 @@ fn main() -> anyhow::Result<()> {
 
     match args {
         Args::Plan(args) => do_plan(args),
-        Args::Convert(args) => do_convert(args),
+        Args::Quantize(args) => do_convert(args),
     }
 }
 
 #[derive(Serialize, Deserialize)]
-struct Plan {
+struct QuantizePlan {
     metadata: Option<HashMap<String, String>>,
     catalog: HashMap<QuantizeKey, QuantizeInfo>,
 }
 
-#[derive(Hash, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Hash, PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
 struct QuantizeKey {
     pub dtype: String,
     pub shape: Vec<usize>,
@@ -101,17 +99,21 @@ fn do_plan(args: PlanArgs) -> Result<(), anyhow::Error> {
             dtype: util::dtype_str(&tensor_info.dtype).to_owned(),
             shape: tensor_info.shape.clone(),
         };
-        let (_, info) = tensors
-            .raw_entry_mut()
-            .from_key(&k)
-            .or_insert(k, Default::default());
+        let info = match tensors.get_mut(&k) {
+            Some(v) => v,
+            None => {
+                assert!(tensors.insert(k.clone(), Default::default()).is_none());
+                tensors.get_mut(&k).unwrap()
+            },
+        };
+        
         info.count += 1;
     }
 
     let writer = File::create(args.plan_out)?;
     cyrly::to_writer(
         &writer,
-        &Plan {
+        &QuantizePlan {
             metadata,
             catalog: tensors,
         },
@@ -120,9 +122,9 @@ fn do_plan(args: PlanArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn do_convert(args: ConvertArgs) -> anyhow::Result<()> {
+fn do_convert(args: QuantizeArgs) -> anyhow::Result<()> {
     let plan_file = File::open(args.plan)?;
-    let plan: Plan = serde_yaml::from_reader(plan_file)?;
+    let plan: QuantizePlan = serde_yaml::from_reader(plan_file)?;
     let file = File::open(args.model_in)?;
     let buffer = unsafe { MmapOptions::new().map(&file)? };
     let tensors = SafeTensors::deserialize(&buffer)?;

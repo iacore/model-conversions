@@ -236,65 +236,17 @@ fn do_quantize(args: QuantizeArgs) -> anyhow::Result<()> {
                 data.into(),
             ),
             _ => {
-                ensure!(dtype == Dtype::F32, "only F32 tensors can be quantized, because ggml is used for quantization.");
-                let mut _loss = [0i64; 1 << 4];
+                // if dtype != Dtype::F32 {
 
-                let n_elem = data.len() / alignment_and_unit_size;
-                let mut work_buffer = vec![0u8; n_elem * 4];
-
-                ensure!(data.len() % alignment_and_unit_size == 0);
-                let ne_0 = *shape
-                    .iter()
-                    .find(|&&x| x != 1)
-                    .with_context(|| "tensor has no dim that != 1")?;
-
-                macro_rules! quantize {
-                    ($func : ident) => {{
-                        let cur_size = unsafe {
-                            ggml_sys::$func(
-                                std::mem::transmute(data.as_ptr()),
-                                std::mem::transmute(work_buffer.as_mut_ptr()),
-                                n_elem.try_into()?,
-                                ne_0.try_into()?,
-                                _loss.as_mut_ptr(),
-                            )
-                        };
-                        work_buffer[0..cur_size].to_vec()
-                    }};
-                }
-
-                match treatment.treatment {
-                    QuantizeTreatment::keep => unreachable!(),
-
-                    // == float32 delta/min  ==
-                    //
-                    QuantizeTreatment::q4_0 => {
-                        let converted = quantize!(ggml_quantize_q4_0);
-                        ("q4_0", 4, converted.into())
-                    }
-                    QuantizeTreatment::q4_1 => {
-                        let converted = quantize!(ggml_quantize_q4_1);
-                        ("q4_1", 4, converted.into())
-                    }
-                    QuantizeTreatment::q8_0 => {
-                        let converted = quantize!(ggml_quantize_q8_0);
-                        ("q8_0", 4, converted.into())
-                    }
-
-                    // == float16 delta/min ==
-                    //
-                    // QuantizeTreatment::q4_2 => {
-                    //     let converted = quantize!(ggml_quantize_q4_2);
-                    //     ("q4_2", 2, converted.into())
+                // }
+                match dtype {
+                    Dtype::F32 => quantize_data(&data, shape, treatment)?,
+                    // Dtype::BF16 => {
+                    //     let data = todo!("convert from BF16", data);
+                    //     quantize_data(&data, shape, treatment)?
                     // }
-                    QuantizeTreatment::q5_0 => {
-                        let converted = quantize!(ggml_quantize_q5_0);
-                        ("q5_0", 2, converted.into())
-                    }
-                    QuantizeTreatment::q5_1 => {
-                        let converted = quantize!(ggml_quantize_q5_1);
-                        ("q5_1", 2, converted.into())
-                    }
+                    // todo: convert f16 to f32 first
+                    other => bail!("Quantization from dtype={other:?} is not supported yet. This is due to a limitation in ggml.")
                 }
             }
         };
@@ -319,6 +271,66 @@ fn do_quantize(args: QuantizeArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn quantize_data<'a>(data: &'a [u8], shape: &[usize], treatment: &QuantizeInfo) -> Result<(&'static str, usize, Cow<'a, [u8]>), anyhow::Error> {
+    let alignment_and_unit_size = Dtype::F32.size();
+
+    let mut _loss = [0i64; 1 << 4];
+    let n_elem = data.len() / alignment_and_unit_size;
+    let mut work_buffer = vec![0u8; n_elem * 4];
+    ensure!(data.len() % alignment_and_unit_size == 0);
+    let ne_0 = *shape
+        .iter()
+        .find(|&&x| x != 1)
+        .with_context(|| "tensor has no dim that != 1")?;
+    macro_rules! quantize {
+        ($func : ident) => {{
+            let cur_size = unsafe {
+                ggml_sys::$func(
+                    std::mem::transmute(data.as_ptr()),
+                    std::mem::transmute(work_buffer.as_mut_ptr()),
+                    n_elem.try_into()?,
+                    ne_0.try_into()?,
+                    _loss.as_mut_ptr(),
+                )
+            };
+            work_buffer[0..cur_size].to_vec()
+        }};
+    }
+    Ok(match treatment.treatment {
+        QuantizeTreatment::keep => unreachable!(),
+
+        // == float32 delta/min  ==
+        //
+        QuantizeTreatment::q4_0 => {
+            let converted = quantize!(ggml_quantize_q4_0);
+            ("q4_0", 4, converted.into())
+        }
+        QuantizeTreatment::q4_1 => {
+            let converted = quantize!(ggml_quantize_q4_1);
+            ("q4_1", 4, converted.into())
+        }
+        QuantizeTreatment::q8_0 => {
+            let converted = quantize!(ggml_quantize_q8_0);
+            ("q8_0", 4, converted.into())
+        }
+
+        // == float16 delta/min ==
+        //
+        // QuantizeTreatment::q4_2 => {
+        //     let converted = quantize!(ggml_quantize_q4_2);
+        //     ("q4_2", 2, converted.into())
+        // }
+        QuantizeTreatment::q5_0 => {
+            let converted = quantize!(ggml_quantize_q5_0);
+            ("q5_0", 2, converted.into())
+        }
+        QuantizeTreatment::q5_1 => {
+            let converted = quantize!(ggml_quantize_q5_1);
+            ("q5_1", 2, converted.into())
+        }
+    })
 }
 
 #[derive(Default)]

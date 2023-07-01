@@ -1,14 +1,19 @@
-What's Included:
+What's included in this repo:
 
-- conversion from pytorch file to safetensors, without loading all in memory
-- quantization from and to safetensors
-
-Also included:
-
+- `model-conversion-wizard`
+    - conversion from pytorch file to safetensors, without loading all in memory
+    - interactive quantization from and to safetensors
+- `safetensors`, a Rust crate that handles reading safetensors file. Not used yet.
 - some python scripts
-- [Interactive Safetensors Quantization Tool](quantize-wizard)
 
-Run `cargo run --bin conversion-wizard` to see usage
+## Usage
+
+```shell
+cd conversion-wizard
+cargo run # this will print usage
+```
+
+## References
 
 See [safetensors](https://github.com/huggingface/safetensors) repo for details about safetensors.
 

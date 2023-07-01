@@ -236,7 +236,7 @@ fn do_quantize(args: QuantizeArgs) -> anyhow::Result<()> {
                 data.into(),
             ),
             _ => {
-                ensure!(dtype == Dtype::F32, "only F32 tensors can be quantized");
+                ensure!(dtype == Dtype::F32, "only F32 tensors can be quantized, because ggml is used for quantization.");
                 let mut _loss = [0i64; 1 << 4];
 
                 let n_elem = data.len() / alignment_and_unit_size;

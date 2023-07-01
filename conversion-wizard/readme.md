@@ -3,6 +3,7 @@
 ```
 # convert model from torch to safetensors (F32)
 # weights must be F32 to be quantized
+
 python ../torch-to-safetensors-f32.py ~/some-model.pth model-f32.safetensors
 
 # plan

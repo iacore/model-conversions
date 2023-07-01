@@ -5,7 +5,7 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::{borrow::Cow, io::Write};
 
-use anyhow::{ensure, Context};
+use anyhow::{bail, ensure, Context};
 use clap::Parser;
 use memmap2::MmapOptions;
 use safetensors::{Dtype, SafeTensors};
@@ -16,8 +16,20 @@ use serde_json::json;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 enum Args {
+    ConvertPyTorch(ConvertPyTorchArgs),
     Plan(PlanArgs),
     Quantize(QuantizeArgs),
+}
+
+#[derive(Parser, Debug)]
+struct ConvertPyTorchArgs {
+    /// input pytorch (.pth) file
+    #[arg()]
+    model_in: PathBuf,
+
+    /// output .safetensors file
+    #[arg()]
+    model_out: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -50,9 +62,76 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     match args {
+        Args::ConvertPyTorch(args) => do_the_pickle_thing(args),
         Args::Plan(args) => do_plan(args),
-        Args::Quantize(args) => do_convert(args),
+        Args::Quantize(args) => do_quantize(args),
     }
+}
+
+/// A view of a Tensor within the file.
+/// Contains references to data within the full byte-buffer
+/// And is thus a readable view of a single tensor
+#[derive(Debug, PartialEq, Eq)]
+pub struct TensorView<'data> {
+    dtype: Dtype,
+    shape: Vec<usize>,
+    data: &'data [u8],
+}
+
+impl<'data> safetensors::View for TensorView<'data> {
+    fn dtype(&self) -> Dtype {
+        self.dtype
+    }
+
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    fn data(&self) -> Cow<[u8]> {
+        self.data.into()
+    }
+
+    fn data_len(&self) -> usize {
+        self.data.len()
+    }
+}
+
+/// load pytorch pickle file gracefully
+fn do_the_pickle_thing(args: ConvertPyTorchArgs) -> Result<(), anyhow::Error> {
+    let file = File::open(&args.model_in)?;
+    let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    let tensors = repugnant_pickle::torch::RepugnantTorchTensors::new_from_file(&args.model_in)?;
+    let mut tensor_slices: Vec<(String, TensorView)> = vec![];
+    for tensor in tensors {
+        tensor_slices.push((
+            tensor.name,
+            TensorView {
+                dtype: match tensor.tensor_type {
+                    repugnant_pickle::TensorType::Float64 => Dtype::F64,
+                    repugnant_pickle::TensorType::Float32 => Dtype::F32,
+                    repugnant_pickle::TensorType::Float16 => Dtype::F16,
+                    repugnant_pickle::TensorType::BFloat16 => Dtype::BF16,
+                    repugnant_pickle::TensorType::Int64 => Dtype::I64,
+                    repugnant_pickle::TensorType::Int32 => Dtype::I32,
+                    repugnant_pickle::TensorType::Int16 => Dtype::I16,
+                    repugnant_pickle::TensorType::Int8 => Dtype::I8,
+                    repugnant_pickle::TensorType::UInt8 => Dtype::U8,
+                    repugnant_pickle::TensorType::Unknown(unknown_datatype) => {
+                        bail!("unknown tensor datatype: {unknown_datatype}")
+                    }
+                },
+                shape: tensor.shape.clone(),
+                data: {
+                    let start_offset = tensor.absolute_offset as usize;
+                    let len: usize = tensor.shape.into_iter().product();
+                    let end_offset = start_offset + len * tensor.tensor_type.size();
+                    &mmap[start_offset..end_offset]
+                },
+            },
+        ));
+    }
+    safetensors::serialize_to_file(tensor_slices, &None, &args.model_out)?;
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,9 +183,9 @@ fn do_plan(args: PlanArgs) -> Result<(), anyhow::Error> {
             None => {
                 assert!(tensors.insert(k.clone(), Default::default()).is_none());
                 tensors.get_mut(&k).unwrap()
-            },
+            }
         };
-        
+
         info.count += 1;
     }
 
@@ -122,7 +201,7 @@ fn do_plan(args: PlanArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn do_convert(args: QuantizeArgs) -> anyhow::Result<()> {
+fn do_quantize(args: QuantizeArgs) -> anyhow::Result<()> {
     let plan_file = File::open(args.plan)?;
     let plan: QuantizePlan = serde_yaml::from_reader(plan_file)?;
     let file = File::open(args.model_in)?;

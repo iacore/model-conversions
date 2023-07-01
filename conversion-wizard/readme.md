@@ -3,10 +3,10 @@
 ```
 # convert model from torch to safetensors (F32)
 # weights must be F32 to be quantized
-python ../torch-to-safetensors-f32.py ~/some-model.pth model-f32.saft
+python ../torch-to-safetensors-f32.py ~/some-model.pth model-f32.safetensors
 
 # plan
-cargo run plan model-f32.saft plan.yaml
+cargo run plan model-f32.safetensors plan.yaml
 
 # edit plan
 kak plan.yaml
@@ -14,7 +14,7 @@ kak plan.yaml
 # see `QuantizeTreatment` in src/main.rs for available formats
 
 # quantize model
-cargo run quantize model-f32.saft plan.yaml quantized.saft
+cargo run quantize model-f32.safetensors plan.yaml quantized.safetensors
 ```
 
 

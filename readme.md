@@ -1,8 +1,14 @@
 What's Included:
 
+- conversion from pytorch file to safetensors, without loading all in memory
+- quantization from and to safetensors
+
+Also included:
+
 - some python scripts
 - [Interactive Safetensors Quantization Tool](quantize-wizard)
 
+Run `cargo run --bin conversion-wizard` to see usage
 
 See [safetensors](https://github.com/huggingface/safetensors) repo for details about safetensors.
 

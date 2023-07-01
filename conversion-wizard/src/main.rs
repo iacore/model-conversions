@@ -1,12 +1,15 @@
 mod util;
 
+use core::mem::size_of;
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
+use std::slice::from_raw_parts;
 use std::{borrow::Cow, io::Write};
 
-use anyhow::{bail, ensure, Context};
+use anyhow::{bail, Context};
 use clap::Parser;
+use half::{bf16, f16};
 use memmap2::MmapOptions;
 use safetensors::{Dtype, SafeTensors};
 use serde::{Deserialize, Serialize};
@@ -158,6 +161,7 @@ struct QuantizeInfo {
 enum QuantizeTreatment {
     #[default]
     keep,
+    F32,
     q4_0,
     q4_1,
     // q4_2,
@@ -229,23 +233,34 @@ fn do_quantize(args: QuantizeArgs) -> anyhow::Result<()> {
             anyhow::bail!("treatment of tensor type not described in plan: type= {k:?}");
         };
 
-        let (dtype, alignment, data) = match treatment.treatment {
-            QuantizeTreatment::keep => (
-                util::dtype_str(&dtype),
-                alignment_and_unit_size,
-                data.into(),
-            ),
+        let QuantizationResult {dtype_name, alignment, data} = match treatment.treatment {
+            QuantizeTreatment::keep => QuantizationResult{
+                dtype_name: util::dtype_str(&dtype),
+                alignment: alignment_and_unit_size,
+                data: data.into(),
+            },
             _ => {
-                // if dtype != Dtype::F32 {
-
-                // }
                 match dtype {
-                    Dtype::F32 => quantize_data(&data, shape, treatment)?,
-                    // Dtype::BF16 => {
-                    //     let data = todo!("convert from BF16", data);
-                    //     quantize_data(&data, shape, treatment)?
-                    // }
-                    // todo: convert f16 to f32 first
+                    Dtype::F32 => {
+                        let data: &[f32] = unsafe { from_raw_parts(data.as_ptr() as *const f32, data.len() / size_of::<f32>()) };
+                        quantize_data(data.into(), shape, treatment)?
+                    },
+                    Dtype::BF16 => {
+                        let data: &[bf16] = unsafe { from_raw_parts(data.as_ptr() as *const bf16, data.len() / size_of::<bf16>()) };
+                        let mut converted: Vec<f32> = Vec::with_capacity(data.len());
+                        for i in 0..converted.len() {
+                            converted[i] = data[i].into();
+                        }
+                        quantize_data(converted.into(), shape, treatment)?
+                    }
+                    Dtype::F16 => {
+                        let data: &[f16] = unsafe { from_raw_parts(data.as_ptr() as *const f16, data.len() / size_of::<f16>()) };
+                        let mut converted: Vec<f32> = Vec::with_capacity(data.len());
+                        for i in 0..converted.len() {
+                            converted[i] = data[i].into();
+                        }
+                        quantize_data(converted.into(), shape, treatment)?
+                    }
                     other => bail!("Quantization from dtype={other:?} is not supported yet. This is due to a limitation in ggml.")
                 }
             }
@@ -253,7 +268,7 @@ fn do_quantize(args: QuantizeArgs) -> anyhow::Result<()> {
         let offsets = write_plan.plan_write(alignment, data);
         out.insert(
             name,
-            json!({ "dtype": dtype, "shape": shape, "offsets": offsets }),
+            json!({ "dtype": dtype_name, "shape": shape, "offsets": offsets }),
         );
     }
 
@@ -273,13 +288,27 @@ fn do_quantize(args: QuantizeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn quantize_data<'a>(data: &'a [u8], shape: &[usize], treatment: &QuantizeInfo) -> Result<(&'static str, usize, Cow<'a, [u8]>), anyhow::Error> {
-    let alignment_and_unit_size = Dtype::F32.size();
+struct QuantizationResult<'a> {
+    dtype_name: &'static str,
+    alignment: usize,
+    data: Cow<'a, [u8]>,
+}
 
+impl<'a> From<(&'static str, usize, Cow<'a, [u8]>)> for QuantizationResult<'a> {
+    fn from(value: (&'static str, usize, Cow<'a, [u8]>)) -> Self {
+        QuantizationResult { dtype_name: value.0, alignment: value.1, data: value.2 }
+    }
+}
+
+fn quantize_data<'a>(
+    data: Cow<'a, [f32]>,
+    shape: &[usize],
+    treatment: &QuantizeInfo,
+) -> Result<QuantizationResult<'a>, anyhow::Error> {
     let mut _loss = [0i64; 1 << 4];
-    let n_elem = data.len() / alignment_and_unit_size;
-    let mut work_buffer = vec![0u8; n_elem * 4];
-    ensure!(data.len() % alignment_and_unit_size == 0);
+    let n_elem = data.len();
+    let mut work_buffer = vec![0u8; n_elem * size_of::<f32>()];
+
     let ne_0 = *shape
         .iter()
         .find(|&&x| x != 1)
@@ -288,8 +317,8 @@ fn quantize_data<'a>(data: &'a [u8], shape: &[usize], treatment: &QuantizeInfo) 
         ($func : ident) => {{
             let cur_size = unsafe {
                 ggml_sys::$func(
-                    std::mem::transmute(data.as_ptr()),
-                    std::mem::transmute(work_buffer.as_mut_ptr()),
+                    data.as_ptr(),
+                    work_buffer.as_mut_ptr() as *mut core::ffi::c_void,
                     n_elem.try_into()?,
                     ne_0.try_into()?,
                     _loss.as_mut_ptr(),
@@ -301,19 +330,24 @@ fn quantize_data<'a>(data: &'a [u8], shape: &[usize], treatment: &QuantizeInfo) 
     Ok(match treatment.treatment {
         QuantizeTreatment::keep => unreachable!(),
 
+        QuantizeTreatment::F32 => {
+            let converted = unsafe { from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+            ("F32", 4, converted.into()).into()
+        }
+
         // == float32 delta/min  ==
         //
         QuantizeTreatment::q4_0 => {
             let converted = quantize!(ggml_quantize_q4_0);
-            ("q4_0", 4, converted.into())
+            ("q4_0", 4, converted.into()).into()
         }
         QuantizeTreatment::q4_1 => {
             let converted = quantize!(ggml_quantize_q4_1);
-            ("q4_1", 4, converted.into())
+            ("q4_1", 4, converted.into()).into()
         }
         QuantizeTreatment::q8_0 => {
             let converted = quantize!(ggml_quantize_q8_0);
-            ("q8_0", 4, converted.into())
+            ("q8_0", 4, converted.into()).into()
         }
 
         // == float16 delta/min ==
@@ -324,11 +358,11 @@ fn quantize_data<'a>(data: &'a [u8], shape: &[usize], treatment: &QuantizeInfo) 
         // }
         QuantizeTreatment::q5_0 => {
             let converted = quantize!(ggml_quantize_q5_0);
-            ("q5_0", 2, converted.into())
+            ("q5_0", 2, converted.into()).into()
         }
         QuantizeTreatment::q5_1 => {
             let converted = quantize!(ggml_quantize_q5_1);
-            ("q5_1", 2, converted.into())
+            ("q5_1", 2, converted.into()).into()
         }
     })
 }

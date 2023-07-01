@@ -10,6 +10,7 @@ anyhow = "1.0.71"
 clap = { version = "4.2.5", features = ["derive"] }
 cyrly = "0.1.0"
 ggml-sys = { git = "https://github.com/rustformers/llm", version = "0.1.1" }
+half = "2.3.1"
 memmap2 = "0.5.10"
 repugnant-pickle = { git = "https://github.com/KerfuffleV2/repugnant-pickle/", version = "0.0.1", features = ["torch"] }
 safetensors = "0.3.1"
